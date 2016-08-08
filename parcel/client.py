@@ -146,6 +146,8 @@ class Client(object):
             # Download file
             try:
                 self.parallel_download(stream)
+                if os.path.isfile(stream.temp_path):
+                    utils.remove_partial_extension(stream.temp_path)
                 self.validate_file_md5sum(stream)
                 downloaded.append(file_id)
 

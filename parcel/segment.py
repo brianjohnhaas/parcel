@@ -1,5 +1,9 @@
 from .portability import OS_WINDOWS
 from intervaltree import Interval, IntervalTree
+from log import get_logger
+from utils import get_pbar, md5sum, mmap_open, STRIP, check_file_existence_and_size
+from const import SAVE_INTERVAL
+from progressbar import ProgressBar, Percentage, Bar, ETA
 import os
 import pickle
 import random
@@ -17,11 +21,6 @@ else:
     # multiprocessing manager
     from multiprocessing import Manager
     WINDOWS = False
-
-from log import get_logger
-from utils import get_pbar, md5sum, mmap_open, STRIP
-from const import SAVE_INTERVAL
-from progressbar import ProgressBar, Percentage, Bar, ETA
 
 log = get_logger('segment')
 
@@ -67,9 +66,9 @@ class SegmentProducer(object):
             self.q_complete = manager.Queue()
 
     def integrate(self, itree):
-        return sum([i.end-i.begin for i in itree.items()])
+        return sum([i.end - i.begin for i in itree.items()])
 
-    def validate_segment_md5sums(self):
+    def validate_segment_md5sums(self, path=None):
         if not self.download.check_segment_md5sums:
             return True
         corrupt_segments = 0
@@ -78,7 +77,7 @@ class SegmentProducer(object):
         pbar = ProgressBar(widgets=[
             Percentage(), ' ',
             Bar(marker='#', left='[', right=']'), ' ', ETA()], fd=sys.stdout)
-        with mmap_open(self.download.path) as data:
+        with mmap_open(path or self.download.path) as data:
             for interval in pbar(intervals):
                 log.debug('Checking segment md5: {}'.format(interval))
                 if not interval.data or 'md5sum' not in interval.data:
@@ -104,7 +103,8 @@ class SegmentProducer(object):
         self.completed = IntervalTree()
         self.size_complete = 0
         if not os.path.isfile(self.download.state_path)\
-           and os.path.isfile(self.download.path):
+           and (os.path.isfile(self.download.path) or
+                os.path.isfile(self.download.temp_path)):
             log.warn(STRIP(
                 """A file named '{} was found but no state file was found at at
                 '{}'. Either this file was downloaded to a different
@@ -112,7 +112,8 @@ class SegmentProducer(object):
                 was deleted.  Parcel refuses to claim the file has
                 been successfully downloaded and will restart the
                 download.\n""").format(
-                    self.download.path, self.download.state_path))
+                    (self.download.path if os.path.isfile(self.download.path)
+                        else self.download.temp_path), self.download.state_path))
             return
 
         if not os.path.isfile(self.download.state_path):
@@ -124,7 +125,8 @@ class SegmentProducer(object):
         log.info('Found state file {}, attempting to resume download'.format(
             self.download.state_path))
 
-        if not os.path.isfile(self.download.path):
+        if not os.path.isfile(self.download.path) and\
+                not os.path.isfile(self.download.temp_path):
             log.warn(STRIP(
                 """State file found at '{}' but no file for {}.
                 Restarting entire download.""".format(
@@ -139,10 +141,15 @@ class SegmentProducer(object):
             self.completed = IntervalTree()
             log.error('Unable to resume file state: {}'.format(str(e)))
         else:
-            self.validate_segment_md5sums()
+            self.validate_segment_md5sums(
+                (self.download.path if os.path.isfile(self.download.path) else
+                 self.download.temp_path))
+            log.debug('Segments checksum validation complete')
             self.size_complete = self.integrate(self.completed)
+            log.debug('size complete: {}'.format(self.size_complete))
             for interval in self.completed:
                 self.work_pool.chop(interval.begin, interval.end)
+            log.debug('State loaded')
 
     def save_state(self):
         try:
@@ -224,9 +231,10 @@ class SegmentProducer(object):
 
     def check_file_exists_and_size(self):
         if self.download.is_regular_file:
-            return (os.path.isfile(self.download.path)
-                    and os.path.getsize(
-                        self.download.path) == self.download.size)
+            return (check_file_existence_and_size(self.download.path,
+                                                  self.download.size) or
+                    check_file_existence_and_size(self.download.temp_path,
+                                                  self.download.size))
         else:
             log.debug('File is not a regular file, refusing to check size.')
             return (os.path.exists(self.download.path))

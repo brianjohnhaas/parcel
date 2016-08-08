@@ -35,7 +35,7 @@ class DownloadStream(object):
     def setup_file(self):
         self.setup_directories()
         try:
-            utils.set_file_length(self.path, self.size)
+            utils.set_file_length(self.temp_path, self.size)
         except:
             self.log.warn(utils.STRIP(
                 """Unable to set file length. File appears to
@@ -56,6 +56,14 @@ class DownloadStream(object):
         :returns: A string specifying the full download path
         """
         return os.path.join(self.directory, self.name)
+
+    @property
+    def temp_path(self):
+        """Function to standardize the temp path for a download.
+
+        :returns: A string specifying the full temp path
+        """
+        return os.path.join(self.directory, '{}.partial'.format(self.name))
 
     @property
     def state_path(self):
@@ -193,7 +201,7 @@ class DownloadStream(object):
                 # Write the chunk to disk, create an interval that
                 # represents the chunk, get md5 info if necessary, and
                 # report completion back to the producer
-                utils.write_offset(self.path, chunk, offset)
+                utils.write_offset(self.temp_path, chunk, offset)
                 if self.check_segment_md5sums:
                     iv_data = {'md5sum': utils.md5sum(chunk)}
                 else:

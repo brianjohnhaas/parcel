@@ -92,6 +92,22 @@ def set_file_length(path, length):
         raise Exception('Unable to set file length: {}'.format(str(e)))
 
 
+def remove_partial_extension(path):
+    try:
+        if path[-8:] != '.partial':
+            log.warn('No partial extension found')
+            log.warn('Got {}'.format(path))
+            return
+        log.info('renaming to {}'.format(path[:-8]))
+        os.rename(path, path[:-8])
+    except Exception as e:
+        raise Exception('Unable to remove partial extension: {}'.format(str(e)))
+
+
+def check_file_existence_and_size(path, size):
+    return (os.path.isfile(path) and os.path.getsize(path) == size)
+
+
 def get_file_type(path):
     try:
         mode = os.stat(path).st_mode
