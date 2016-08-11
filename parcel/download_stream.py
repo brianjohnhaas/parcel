@@ -211,7 +211,8 @@ class DownloadStream(object):
                 return self.write_segment(segment, q_complete, retries-1)
             else:
                 self.log.error('Max retries exceeded.')
-                return 0
+                raise RuntimeError('Max retries exceeded.')
+                #return 0
 
         # Check that the data is not truncated or elongated
         if written != segment.end-segment.begin:
