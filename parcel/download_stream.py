@@ -119,7 +119,7 @@ class DownloadStream(object):
 
         headers = self.headers() if headers is None else headers
         try:
-            r = s.get(url, headers=headers, verify=verify, stream=True)
+            r = s.get(url, headers=headers, verify=verify, stream=True, timeout=150) # adding timeout, bhaas
         except Exception as e:
             raise RuntimeError((
                 "Unable to connect to API: ({}). Is this url correct: '{}'? "

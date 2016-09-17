@@ -9,6 +9,7 @@ from .segment import SegmentProducer
 import os
 import tempfile
 import time
+import sys
 
 # Logging
 log = get_logger('client')
@@ -187,6 +188,8 @@ class Client(object):
         n_procs = 1 if stream.size < .01 * const.GB else nprocs
         producer = SegmentProducer(stream, n_procs)
 
+        parent_pid = os.getpid()
+
         def download_worker():
             while True:
                 try:
@@ -199,7 +202,10 @@ class Client(object):
                         raise
                     else:
                         log.error("Download aborted: {}".format(str(e)))
-                        raise RuntimeError("Download aborted: {}".format(str(e)))
+
+                        log.error("Trying to kill the parent process {}".format(parent_pid))
+                        os.system("kill -9 {}".format(parent_pid)) # wicked hack
+                        raise RuntimeError("death to child process")
         
         # Divide work amongst process pool
         pool = [Process(target=download_worker) for i in range(n_procs)]
