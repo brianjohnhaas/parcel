@@ -17,7 +17,7 @@ class DownloadStream(object):
         self.ID = ID
         self.initialized = False
         self.is_regular_file = True
-        self.log = get_logger(str(ID))
+        self.log = get_logger(__name__ + ":" + str(ID))
         self.name = None
         self.directory = directory
         self.size = None
@@ -168,6 +168,8 @@ class DownloadStream(object):
 
         """
 
+        child_pid = os.getpid()
+
         written = 0
         # Create header that specifies range and make initial stream
         # request. Note the 1 subtracted from the end of the interval
@@ -181,8 +183,9 @@ class DownloadStream(object):
             r = self.request(self.header(start, end))
 
             # Iterate over the data stream
-            self.log.debug('Initializing segment: {}-{}'.format(start, end))
+            self.log.debug('Child {} Initializing segment: {}-{}'.format(child_pid, start, end))
             for chunk in r.iter_content(chunk_size=self.http_chunk_size):
+                self.log.debug("Child {} got chunk of length: {}".format(child_pid, len(chunk)))
                 if not chunk:
                     continue  # Empty are keep-alives.
                 offset = start + written
@@ -197,6 +200,7 @@ class DownloadStream(object):
                 else:
                     iv_data = None
                 complete_segment = Interval(offset, offset+len(chunk), iv_data)
+                self.log.debug("Child {} Adding completed segment {}".format(child_pid, complete_segment))
                 q_complete.put(complete_segment)
 
         except KeyboardInterrupt:
@@ -224,6 +228,9 @@ class DownloadStream(object):
                 raise RuntimeError('Segment corruption. Max retries exceeded.')
 
         r.close()
+
+        self.log.debug("write_segment() returning with {}".format(written))
+        
         return written
 
     def print_download_information(self):

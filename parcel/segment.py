@@ -23,7 +23,9 @@ from const import SAVE_INTERVAL
 from progressbar import ProgressBar, Percentage, Bar, ETA
 
 log = get_logger('segment')
-
+log.info("segment info msg")
+log.warning("segment warning msg")
+log.debug("segment debug msg")
 
 class SegmentProducer(object):
 
@@ -49,12 +51,15 @@ class SegmentProducer(object):
         self.pbar = get_pbar(self.download.ID, self.download.size)
 
     def _setup_work(self):
+
+        work_size = self.integrate(self.work_pool)
+        self.block_size = work_size / self.n_procs
+
         if self.is_complete():
             log.info('File already complete.')
             return
 
-        work_size = self.integrate(self.work_pool)
-        self.block_size = work_size / self.n_procs
+
 
     def _setup_queues(self):
         if WINDOWS:
@@ -66,7 +71,53 @@ class SegmentProducer(object):
             self.q_complete = manager.Queue()
 
     def integrate(self, itree):
-        return sum([i.end-i.begin for i in itree.items()])
+
+        intervals = itree.items()
+
+        ## because of overlap, we must take those overlapping regions into account
+        def __sort_intervals (a,b):                                                                                                                  
+            if a.begin > b.begin:
+                return 1
+            elif a.begin == b.begin:
+                if a.end > b.end:
+                    return 1
+                elif a.end < b.end:                                                                                         
+                    return -1
+                else:
+                    return 0                                                                                              
+            else:
+                return -1      
+            
+        intervals = sorted(intervals, cmp=__sort_intervals)
+        
+        if (0):  ## debugging, bhaas, found some intervals that overlapped, having same start position but different end positions.
+            log.debug("writing itree.spans file info")
+            with open('itree.spans', 'w') as ofh:
+                for i in intervals:
+                    ofh.write("\t".join([str(i.begin), str(i.end)]) + "\n")
+                    log.debug("interval: " + "\t".join([str(i.begin), str(i.end)]))
+
+        #interval_sum = sum([i.end-i.begin for i in itree.items()])
+
+        interval_sum = 0
+        prev_end = -1
+        for i in intervals:
+            interval_len = i.end - i.begin
+
+            if prev_end > 0 and prev_end > i.begin:
+                interval_len = i.end - prev_end
+
+            interval_sum += interval_len
+            prev_end = i.end
+        
+            
+
+
+        log.debug("interval sum: {}".format(interval_sum))
+        
+        return interval_sum
+    
+    
 
     def validate_segment_md5sums(self):
         if not self.download.check_segment_md5sums:
@@ -137,12 +188,19 @@ class SegmentProducer(object):
             self.completed = IntervalTree()
             log.error('Unable to resume file state: {}'.format(str(e)))
         else:
+            log.debug("validating segment md5sums")
             self.validate_segment_md5sums()
             self.size_complete = self.integrate(self.completed)
+            log.debug("size_complete: {}".format(self.size_complete))
             for interval in self.completed:
+                log.debug("chopping completed intervals: {} - {}".format(interval.begin, interval.end))
                 self.work_pool.chop(interval.begin, interval.end)
+            log.debug("work pool left: {}".format(self.work_pool))
+            
 
     def save_state(self):
+        log.debug("SAVING STATE()")
+        
         try:
             # Grab a temp file in the same directory (hopefully avoud
             # cross device links) in order to atomically write our save file
@@ -197,8 +255,9 @@ class SegmentProducer(object):
     def schedule(self):
         while True:
             interval = self._get_next_interval()
-            log.debug('Returning interval: {}'.format(interval))
+            log.debug('Schedule: interval: {}'.format(interval))
             if not interval:
+                log.debug("done setting up scheduler.")
                 return
             self.q_work.put(interval)
 
@@ -222,6 +281,8 @@ class SegmentProducer(object):
 
     def check_file_exists_and_size(self):
         if self.download.is_regular_file:
+
+            
             return (os.path.isfile(self.download.path)
                     and os.path.getsize(
                         self.download.path) == self.download.size)
@@ -230,9 +291,17 @@ class SegmentProducer(object):
             return (os.path.exists(self.download.path))
 
     def is_complete(self):
+        log.debug("is_complete(): self.integrate(self.completed): {}, self.download.size: {}".format(self.integrate(self.completed), self.download.size))
+
+        log.debug("check_file_exists_and_size: size so far: {}, and expected size: {}".format(os.path.getsize(self.download.path),
+                                                                                                  self.download.size))
+
+        
+
         return (self.integrate(self.completed) == self.download.size and
                 self.check_file_exists_and_size())
 
+    
     def finish_download(self):
         # Tell the children there is no more work, each child should
         # pull one NoneType from the queue and exit
@@ -252,11 +321,16 @@ class SegmentProducer(object):
             self.pbar.finish()
 
     def wait_for_completion(self):
+
+        log.debug("WAIT_FOR_COMPLETION()")
+        
         try:
             since_save = 0
             while not self.is_complete():
                 while since_save < self.save_interval:
+                    log.debug("wait_for_completion loop: since_save: {}, save_interval: {}".format(since_save, self.save_interval))
                     interval = self.q_complete.get()
+                    log.debug("wait_for_completion loop: got completed interval: {}".format(interval))
                     self.completed.add(interval)
                     if self.is_complete():
                         break
@@ -267,4 +341,4 @@ class SegmentProducer(object):
                 since_save = 0
                 self.save_state()
         finally:
-            self.finish_download()
+            self.finish_download()  ## adds None values to work queues so all children exit

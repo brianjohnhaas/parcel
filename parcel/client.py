@@ -33,6 +33,9 @@ class Client(object):
 
         """
 
+
+        # n_procs = 1  ### DEBUG.... multiple procs causing trouble
+
         DownloadStream.http_chunk_size = kwargs.get(
             'http_chunk_size', const.HTTP_CHUNK_SIZE)
         DownloadStream.check_segment_md5sums = kwargs.get(
@@ -193,10 +196,15 @@ class Client(object):
         def download_worker():
             while True:
                 try:
+                    log.debug("worker asking for segment from work queue: {}".format(producer.q_work))
                     segment = producer.q_work.get()
+                    log.debug("worker has segment: {}".format(segment))
                     if segment is None:
-                        return log.debug('Producer returned with no more work')
+                        log.debug('Producer returned with no more work')
+                        return 
                     stream.write_segment(segment, producer.q_complete)
+                    log.debug("worker done writing segment")
+                    
                 except Exception as e:
                     if self.debug:
                         raise
